@@ -1093,7 +1093,6 @@ class GameEngine:
                           (int(self.farmer.x + self.farmer.width//2), 
                            int(self.farmer.y + self.farmer.height//2)), 
                           60, (0, 255, 255), 2)
-            
             self.draw_farmer(game_frame)
             
             ui_box_height = 50
