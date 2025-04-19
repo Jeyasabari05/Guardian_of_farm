@@ -478,6 +478,10 @@ class GameEngine:
             else:
                 print(f"Found crop image at: {self.crop_img_path}")
             
+            self.font = cv2.FONT_HERSHEY_SIMPLEX
+            self.font_scale = 0.9
+            self.font_thickness = 2
+            
             if os.path.exists(bg_path):
                 print(f"Loading background from: {bg_path}")
                 self.background = cv2.imread(bg_path)
@@ -575,6 +579,38 @@ class GameEngine:
             self.max_enemy_spawn_interval = 4.0
             self.max_enemies = 8
             self.crop_targeting_chance = 0.8
+            self.font = cv2.FONT_HERSHEY_SIMPLEX
+            self.font_scale = 0.9
+            self.font_thickness = 2
+    
+    def draw_pixelated_text(self, img, text, position, color, font_scale=1.0, thickness=2):
+        x, y = position
+        
+        shadow_offset = int(2 * font_scale)
+        cv2.putText(img, text, (x + shadow_offset, y + shadow_offset), 
+                    self.font, font_scale, (0, 0, 0), thickness + 1)
+        
+        for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+            cv2.putText(img, text, (x + dx, y + dy), 
+                        self.font, font_scale, (0, 0, 0), thickness)
+        
+        cv2.putText(img, text, (x, y), 
+                    self.font, font_scale, color, thickness)
+        
+        return img
+    
+    def draw_ui_panel(self, img, pos, size, color=(60, 60, 60), alpha=0.7, border_color=None, border_size=2):
+        x, y, w, h = pos[0], pos[1], size[0], size[1]
+        
+        overlay = img.copy()
+        cv2.rectangle(overlay, (x, y), (x + w, y + h), color, -1)
+        
+        cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+        
+        if border_color:
+            cv2.rectangle(img, (x, y), (x + w, y + h), border_color, border_size)
+        
+        return img
     
     def create_crops(self):
         for crop in self.crops:
@@ -622,7 +658,7 @@ class GameEngine:
     
     def add_time(self, seconds):
         self.remaining_time += seconds
-        self.add_notification(f"+{seconds:.1f}s", (0, 255, 255))
+        self.add_notification(f"+{seconds:.1f}s", (0, 255, 255), category="time")
     
     def handle_game_end(self, time_expired):
         if time_expired and self.are_any_crops_alive():
@@ -634,12 +670,12 @@ class GameEngine:
             
             self.score += bonus_points
             
-            self.add_notification(f"VICTORY! +{bonus_points} BONUS POINTS!", (0, 255, 0), 300)
+            self.add_notification(f"VICTORY! +{bonus_points} BONUS POINTS!", (0, 255, 0), 300, category="endgame")
         else:
             self.game_over = True
             
             reason = "Time's up!" if time_expired else "All crops destroyed!"
-            self.add_notification(f"GAME OVER! {reason}", (255, 0, 0), 300)
+            self.add_notification(f"GAME OVER! {reason}", (255, 0, 0), 300, category="endgame")
     
     def are_any_crops_alive(self):
         return any(not crop.is_destroyed() for crop in self.crops)
@@ -665,6 +701,7 @@ class GameEngine:
                 'vel_x': vel_x,
                 'vel_y': vel_y
             })
+    
     def update_smoke_particles(self):
         for particle in self.smoke_particles[:]:
             particle['life'] -= 1
@@ -744,7 +781,7 @@ class GameEngine:
                 'is_superpower': self.farmer.has_superpower
             })
             
-            self.add_notification(f"Shoot!", bullet_color, 30)
+            self.add_notification(f"Shoot!", bullet_color, 30, category="shoot")
             
         except Exception as e:
             print(f"Error creating bullet: {e}")
@@ -756,7 +793,7 @@ class GameEngine:
             if current_time - self.last_superpower_time > self.superpower_cooldown:
                 self.farmer.activate_superpower()
                 
-                self.add_notification("SUPERPOWER ACTIVATED!", (0, 255, 255))
+                self.add_notification("SUPERPOWER ACTIVATED!", (0, 255, 255), category="superpower")
                 
                 self.superpower_active = True
                 self.superpower_effect_timer = 0
@@ -770,17 +807,35 @@ class GameEngine:
             traceback.print_exc()
             return False
     
-    def add_notification(self, text, color, duration=90):
+    def add_notification(self, text, color, duration=90, category="default"):
+        for i, notification in enumerate(self.notifications):
+            if notification.get('category') == category and category != "default":
+                self.notifications[i] = {
+                    'text': text,
+                    'color': color,
+                    'timer': 0,
+                    'duration': duration,
+                    'category': category,
+                    'animation': 0
+                }
+                return
+                
         self.notifications.append({
             'text': text,
             'color': color,
             'timer': 0,
-            'duration': duration
+            'duration': duration,
+            'category': category,
+            'animation': 0
         })
     
     def update_notifications(self):
         for notification in self.notifications[:]:
             notification['timer'] += 1
+            
+            if notification['animation'] < 10:
+                notification['animation'] += 1
+                
             if notification['timer'] >= notification['duration']:
                 self.notifications.remove(notification)
                 
@@ -807,7 +862,7 @@ class GameEngine:
                 
                 self.score += 1
                 
-                self.add_notification("Enemy defeated!", (0, 255, 0), 60)
+                self.add_notification("Enemy defeated!", (0, 255, 0), 60, category="enemy_hit")
                 
                 self.farmer.start_attack_animation()
     
@@ -860,9 +915,9 @@ class GameEngine:
                         enemy.start_death_animation()
                         
                         if is_destroyed:
-                            self.add_notification("Crop destroyed!", (255, 0, 0))
+                            self.add_notification("Crop destroyed!", (255, 0, 0), category="crop_status")
                         else:
-                            self.add_notification(f"Crop damaged! Health: {crop.health}/{crop.max_health}", (255, 165, 0))
+                            self.add_notification(f"Crop damaged! Health: {crop.health}/{crop.max_health}", (255, 165, 0), category="crop_status")
                         
                         if self.are_all_crops_destroyed():
                             self.handle_game_end(False)
@@ -888,9 +943,9 @@ class GameEngine:
                             self.score += points
                             
                             if points > 1:
-                                self.add_notification(f"+{points} points!", (0, 255, 0), 60)
+                                self.add_notification(f"+{points} points!", (0, 255, 0), 60, category="points")
                             else:
-                                self.add_notification(f"Enemy hit!", (0, 255, 255), 30)
+                                self.add_notification(f"Enemy hit!", (0, 255, 255), 30, category="enemy_hit")
                             
                             self.farmer.start_attack_animation()
                             
@@ -932,11 +987,15 @@ class GameEngine:
         try:
             game_frame = self.background.copy() if self.background is not None else np.zeros((720, 1280, 3), dtype=np.uint8)
             
-            cv2.rectangle(game_frame, (0, self.height - 50), (self.width, self.height), (30, 120, 30), -1)
+            self.draw_ui_panel(game_frame, (0, self.height - 50), (self.width, 50), 
+                               color=(30, 80, 30), alpha=0.8, border_color=(40, 120, 40), border_size=2)
             
             if self.superpower_active:
-                cv2.putText(game_frame, "SUPERPOWER ACTIVATED!", (self.width // 2 - 250, 100), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+                self.draw_ui_panel(game_frame, (self.width // 2 - 260, 50), (520, 60), 
+                                  color=(0, 0, 100), alpha=0.7, border_color=(0, 0, 255), border_size=3)
+                
+                self.draw_pixelated_text(game_frame, "SUPERPOWER ACTIVATED!", 
+                                       (self.width // 2 - 250, 100), (0, 140, 255), 1.5, 3)
             
             for bullet in self.bullets:
                 cv2.circle(game_frame, (int(bullet['x']), int(bullet['y'])), 
@@ -978,11 +1037,17 @@ class GameEngine:
                         )
                 else:
                     game_frame[y1:y2, x1:x2] = crop.img
-                health_width = 60
-                health_height = 8
-                health_x = x1 + (crop.width - health_width) // 2
-                health_y = y1 - 15
                 
+                health_width = 60
+                health_height = 10
+                health_x = x1 + (crop.width - health_width) // 2
+                health_y = y1 - 18
+                
+                cv2.rectangle(game_frame,
+                             (health_x-2, health_y-2),
+                             (health_x + health_width+2, health_y + health_height+2),
+                             (20, 20, 20),
+                             -1)
                 cv2.rectangle(game_frame,
                              (health_x, health_y),
                              (health_x + health_width, health_y + health_height),
@@ -991,11 +1056,17 @@ class GameEngine:
                              
                 current_health_width = int((crop.health / crop.max_health) * health_width)
                 health_color = crop.get_health_color()
-                cv2.rectangle(game_frame,
-                             (health_x, health_y),
-                             (health_x + current_health_width, health_y + health_height),
-                             health_color,
-                             -1)
+                
+                for i in range(health_height):
+                    bar_color = list(health_color)
+                    brightness_factor = 1.3 - (i / health_height)
+                    bar_color = [min(255, int(c * brightness_factor)) for c in bar_color]
+                    
+                    cv2.line(game_frame,
+                            (health_x, health_y + i),
+                            (health_x + current_health_width, health_y + i),
+                            tuple(bar_color),
+                            1)
                              
                 if crop.is_being_hit:
                     if crop.hit_timer % 3 < 2:
@@ -1097,87 +1168,255 @@ class GameEngine:
             
             ui_box_height = 50
             
-            cv2.rectangle(game_frame, 
-                         (0, 0), 
-                         (self.width, ui_box_height), 
-                         (0, 0, 0, 128), -1)
+            self.draw_ui_panel(game_frame, 
+                              (0, 0), 
+                              (self.width, ui_box_height), 
+                              color=(40, 40, 60),
+                              alpha=0.85,
+                              border_color=(60, 60, 100),
+                              border_size=2)
             
             score_text = f"Score: {self.score}"
-            cv2.putText(game_frame, score_text, (20, 35), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-                       
+            score_width = cv2.getTextSize(score_text, self.font, self.font_scale, self.font_thickness)[0][0]
+            score_panel_width = score_width + 30
+            
+            self.draw_ui_panel(game_frame, 
+                              (10, 8), 
+                              (score_panel_width, 35), 
+                              color=(60, 60, 100),
+                              alpha=0.7,
+                              border_color=(100, 100, 180),
+                              border_size=1)
+                              
+            self.draw_pixelated_text(game_frame, score_text, (25, 35), 
+                                   (255, 255, 255), 0.9, 2)
+            
             minutes = int(self.remaining_time) // 60
             seconds = int(self.remaining_time) % 60
             time_color = (255, 255, 255)  
             if self.remaining_time < 10:  
-                time_color = (0, 0, 255)
+                time_color = (255, 50, 50)
             elif self.remaining_time < 30:  
-                time_color = (0, 200, 255)
+                time_color = (255, 200, 50)
+                
             time_text = f"Time: {minutes:02}:{seconds:02}"
-            cv2.putText(game_frame, time_text, (250, 35), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, time_color, 2)
+            time_width = cv2.getTextSize(time_text, self.font, self.font_scale, self.font_thickness)[0][0]
+            
+            time_panel_color = (80, 50, 50) if self.remaining_time < 10 else (70, 70, 100)
+            time_border_color = (180, 50, 50) if self.remaining_time < 10 else (100, 100, 180)
+            
+            self.draw_ui_panel(game_frame, 
+                              (score_panel_width + 30, 8), 
+                              (time_width + 30, 35), 
+                              color=time_panel_color,
+                              alpha=0.7,
+                              border_color=time_border_color,
+                              border_size=1)
+            
+            self.draw_pixelated_text(game_frame, time_text, (score_panel_width + 45, 35), 
+                                    time_color, 0.9, 2)
             
             alive_crops = sum(1 for crop in self.crops if not crop.is_destroyed())
             crop_text = f"Crops: {alive_crops}/{len(self.crops)}"
-            cv2.putText(game_frame, crop_text, (450, 35), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+            crop_width = cv2.getTextSize(crop_text, self.font, self.font_scale, self.font_thickness)[0][0]
+            
+            crop_panel_x = score_panel_width + time_width + 80
+            
+            self.draw_ui_panel(game_frame, 
+                              (crop_panel_x, 8), 
+                              (crop_width + 30, 35), 
+                              color=(50, 80, 50),
+                              alpha=0.7,
+                              border_color=(80, 160, 80),
+                              border_size=1)
+                              
+            self.draw_pixelated_text(game_frame, crop_text, (crop_panel_x + 15, 35), 
+                                   (180, 255, 180), 0.9, 2)
             
             cooldown_remaining = max(0, self.superpower_cooldown - (time.time() - self.last_superpower_time))
             
             if self.farmer.has_superpower:
                 time_left = int((self.farmer.superpower_duration - self.farmer.superpower_timer) / 30)
                 superpower_text = f"SUPERPOWER: {time_left}s"
-                color = (0, 0, 255)
+                color = (50, 50, 255)
+                panel_color = (30, 30, 150)
+                border_color = (80, 80, 255)
             elif cooldown_remaining == 0:
                 superpower_text = "SUPERPOWER: READY!"
-                color = (0, 255, 0)
+                color = (50, 255, 50)
+                panel_color = (20, 120, 20)
+                border_color = (80, 255, 80)
             else:
                 superpower_text = f"SUPERPOWER: {int(cooldown_remaining)}s"
-                color = (0, 0, 255)
+                color = (200, 150, 50)
+                panel_color = (100, 70, 20)
+                border_color = (200, 150, 50)
+            
+            if cooldown_remaining == 0 and not self.farmer.has_superpower:
+                pulse = abs(math.sin(time.time() * 5)) * 0.5 + 0.5
+                border_color = tuple([int(c * pulse + c * (1-pulse) * 0.5) for c in border_color])
+            
+            superpower_width = cv2.getTextSize(superpower_text, self.font, self.font_scale, self.font_thickness)[0][0]
+            
+            self.draw_ui_panel(game_frame, 
+                              (self.width - superpower_width - 40, 8), 
+                              (superpower_width + 30, 35), 
+                              color=panel_color,
+                              alpha=0.7,
+                              border_color=border_color,
+                              border_size=2)
+                              
+            self.draw_pixelated_text(game_frame, superpower_text, (self.width - superpower_width - 25, 35), 
+                                   color, 0.9, 2)
+            
+            notification_groups = {}
+            for notification in self.notifications:
+                category = notification.get('category', 'default')
+                if category not in notification_groups:
+                    notification_groups[category] = []
+                notification_groups[category].append(notification)
+            
+            category_positions = {
+                'default': (self.width // 2, 200),          
+                'time': (self.width - 150, 150),            
+                'crop_status': (self.width // 2, 160),      
+                'enemy_hit': (self.width // 2, 240),        
+                'points': (self.width // 2, 280),           
+                'shoot': (self.width // 2 + 100, 200),      
+                'superpower': (self.width // 2, 120),       
+                'endgame': (self.width // 2, self.height // 2 - 50)  
+            }
+            
+            for category, notifications in notification_groups.items():
+                if category in category_positions:
+                    base_x, base_y = category_positions[category]
+                else:
+                    base_x, base_y = category_positions['default']
+                    
+                notification_y = base_y
                 
-            cv2.putText(game_frame, superpower_text, (self.width - 350, 35), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+                for notification in notifications:
+                    fade = 1.0
+                    if notification['timer'] > notification['duration'] * 0.7:
+                        fade = 1.0 - ((notification['timer'] - notification['duration'] * 0.7) / (notification['duration'] * 0.3))
+                    
+                    anim_offset = 0
+                    if notification['animation'] < 10:
+                        anim_offset = 50 - (notification['animation'] * 5)
+                    
+                    color = notification['color']
+                    color = tuple([int(c * fade) for c in color])
+                    
+                    text = notification['text']
+                    text_size = cv2.getTextSize(text, self.font, 1, 2)[0]
+                    text_width, text_height = text_size
+                    
+                    text_x = base_x - (text_width // 2) + anim_offset
+                    
+                    panel_padding = 10
+                    panel_height = text_height + panel_padding * 2
+                    panel_width = text_width + panel_padding * 2
+                    
+                    panel_alpha = 0.7 * fade
+                    
+                    panel_color = (30, 30, 40)
+                    self.draw_ui_panel(game_frame,
+                                     (text_x - panel_padding, notification_y - text_height - panel_padding),
+                                     (panel_width, panel_height),
+                                     color=panel_color,
+                                     alpha=panel_alpha,
+                                     border_color=color,
+                                     border_size=2)
+                    
+                    self.draw_pixelated_text(game_frame, 
+                                          text, 
+                                          (text_x, notification_y), 
+                                          color, 
+                                          1, 
+                                          2)
+                    
+                    notification_y += panel_height + 5
+            
             if self.game_over:
                 overlay = game_frame.copy()
                 cv2.rectangle(overlay, (0, 0), (self.width, self.height), (0, 0, 0), -1)
                 cv2.addWeighted(overlay, 0.7, game_frame, 0.3, 0, game_frame)
                 
+                panel_width = 600
+                panel_height = 300
+                panel_x = (self.width - panel_width) // 2
+                panel_y = (self.height - panel_height) // 2
+                
                 if self.game_won:
-                    cv2.putText(game_frame, "VICTORY!", (self.width // 2 - 150, self.height // 2 - 50), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 5)
-                    cv2.putText(game_frame, f"Final Score: {self.score}", (self.width // 2 - 130, self.height // 2 + 20), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    panel_color = (0, 70, 0)
+                    border_color = (0, 200, 0)
+                    title_color = (100, 255, 100)
+                else:
+                    panel_color = (70, 0, 0)
+                    border_color = (200, 0, 0)
+                    title_color = (255, 100, 100)
+                
+                pulse = abs(math.sin(time.time() * 2)) * 0.5 + 0.5
+                adjusted_border = tuple([int(c * pulse + c * (1-pulse) * 0.5) for c in border_color])
+                
+                self.draw_ui_panel(game_frame, 
+                                  (panel_x, panel_y), 
+                                  (panel_width, panel_height), 
+                                  color=panel_color, 
+                                  alpha=0.85,
+                                  border_color=adjusted_border, 
+                                  border_size=4)
+                
+                cv2.rectangle(game_frame, 
+                             (panel_x + 10, panel_y + 10), 
+                             (panel_x + panel_width - 10, panel_y + panel_height - 10),
+                             adjusted_border, 1)
+                
+                if self.game_won:
+                    self.draw_pixelated_text(game_frame, 
+                                           "VICTORY!", 
+                                           (panel_x + panel_width//2 - 120, panel_y + 80), 
+                                           title_color, 2, 5)
+                    
+                    self.draw_pixelated_text(game_frame, 
+                                           f"Final Score: {self.score}", 
+                                           (panel_x + panel_width//2 - 120, panel_y + 150), 
+                                           (255, 255, 255), 1, 2)
                     
                     surviving_crops = sum(1 for crop in self.crops if not crop.is_destroyed())
-                    cv2.putText(game_frame, f"Crops Saved: {surviving_crops}/{len(self.crops)}", 
-                               (self.width // 2 - 150, self.height // 2 + 60), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                    self.draw_pixelated_text(game_frame, 
+                                           f"Crops Saved: {surviving_crops}/{len(self.crops)}", 
+                                           (panel_x + panel_width//2 - 140, panel_y + 190), 
+                                           (100, 255, 255), 1, 2)
                 else:
-                    cv2.putText(game_frame, "GAME OVER!", (self.width // 2 - 150, self.height // 2 - 50), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 5)
-                    cv2.putText(game_frame, f"Final Score: {self.score}", (self.width // 2 - 130, self.height // 2 + 20), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    self.draw_pixelated_text(game_frame, 
+                                           "GAME OVER!", 
+                                           (panel_x + panel_width//2 - 140, panel_y + 80), 
+                                           title_color, 2, 5)
+                    self.draw_pixelated_text(game_frame, 
+                                           f"Final Score: {self.score}", 
+                                           (panel_x + panel_width//2 - 120, panel_y + 150), 
+                                           (255, 255, 255), 1, 2)
+                instruction_text = "Press 'r' to Restart or 'q' to Quit"
+                blink_effect = 0.7 + 0.3 * math.sin(time.time() * 4)
+                instruction_color = (int(255 * blink_effect), int(255 * blink_effect), int(255 * blink_effect))
+    
+                instruction_width = cv2.getTextSize(instruction_text, self.font, 1, 2)[0][0]
+                instruction_x = panel_x + (panel_width - instruction_width) // 2
+                instruction_y = panel_y + panel_height - 40
                 
-                cv2.putText(game_frame, "Press 'r' to Restart or 'f' to Quit", 
-                           (self.width // 2 - 250, self.height // 2 + 80), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            
-            notification_y = 200
-            for notification in self.notifications:
-                fade = 1.0
-                if notification['timer'] > notification['duration'] * 0.7:
-                    fade = 1.0 - ((notification['timer'] - notification['duration'] * 0.7) / (notification['duration'] * 0.3))
-                
-                color = notification['color']
-                text_size = cv2.getTextSize(notification['text'], cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
-                text_x = (self.width - text_size[0]) // 2
-                
-                cv2.putText(game_frame, notification['text'], (text_x+2, notification_y+2), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
-                cv2.putText(game_frame, notification['text'], (text_x, notification_y), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                
-                notification_y += 40
+                self.draw_ui_panel(game_frame, 
+                                 (instruction_x - 20, instruction_y - 30), 
+                                 (instruction_width + 40, 40), 
+                                 color=(60, 60, 60), 
+                                 alpha=0.7, 
+                                 border_color=(150, 150, 150), 
+                                 border_size=1)
+                                 
+                self.draw_pixelated_text(game_frame, 
+                                       instruction_text, 
+                                       (instruction_x, instruction_y), 
+                                       instruction_color, 1, 2)
             
             return game_frame
             
