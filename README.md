@@ -2,43 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Farm Defense Game</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f4fdf4;
-      color: #333;
-      line-height: 1.6;
-      padding: 20px;
-      max-width: 800px;
-      margin: auto;
-    }
-    h1, h2 {
-      color: #2e7d32;
-    }
-    hr {
-      border: none;
-      height: 2px;
-      background-color: #c8e6c9;
-      margin: 30px 0;
-    }
-    ul {
-      padding-left: 20px;
-    }
-    a {
-      color: #388e3c;
-      text-decoration: none;
-    }
-    a:hover {
-      text-decoration: underline;
-    }
-    code {
-      background-color: #e0f2f1;
-      padding: 3px 6px;
-      border-radius: 4px;
-      font-size: 0.95em;
-    }
-  </style>
 </head>
 <body>
 
